@@ -1,6 +1,12 @@
-﻿using DocInsight.Core.Interfaces;
+﻿using DocInsight.Core.Exceptions;
+using DocInsight.Core.Interfaces;
 using DocInsight.Core.Models;
+using Microsoft.Extensions.Logging;
 using OpenAI.Chat;
+using Polly.CircuitBreaker;
+using System.Diagnostics;
+using Microsoft.Extensions.Options; 
+using DocInsight.Core.Models.Settings; 
 
 namespace DocInsight.Infrastructure.OpenAI;
 
@@ -9,15 +15,22 @@ public class QAService : IQAService
     private readonly IEmbeddingService _embeddingService;
     private readonly IVectorStore _vectorStore;
     private readonly ChatClient _chatClient;
+    private readonly ILogger<QAService> _logger;
+    private readonly IOptions<QASettings> _options;
+    private static readonly ActivitySource _activitySource = new ActivitySource("DocInsight.QAService");
 
     public QAService(
-        IEmbeddingService embeddingService,
-        IVectorStore vectorStore,
-        ChatClient chatClient)
+    IEmbeddingService embeddingService,
+    IVectorStore vectorStore,
+    ChatClient chatClient,
+    ILogger<QAService> logger,
+    IOptions<QASettings> options)
     {
         _embeddingService = embeddingService;
         _vectorStore = vectorStore;
         _chatClient = chatClient;
+        _logger = logger;
+        _options = options;
     }
 
     public async Task<QuestionResponse> AnswerAsync(
@@ -53,6 +66,7 @@ public class QAService : IQAService
             Answer = answer,
             Sources = relevantChunks
         };
+      
     }
 
     private static string BuildPrompt(
@@ -93,10 +107,18 @@ public class QAService : IQAService
             new UserChatMessage(prompt)
         };
 
-        var response = await _chatClient.CompleteChatAsync(
-            messages,
-            cancellationToken: cancellationToken);
-
-        return response.Value.Content[0].Text;
+        try
+        {
+            var response = await _chatClient.CompleteChatAsync(
+                messages,
+                cancellationToken: cancellationToken);
+            return response.Value.Content[0].Text;
+        }
+        catch (BrokenCircuitException ex)
+        {
+            // Polly threw this — translate it
+            throw new AIServiceUnavailableException(
+                "AI service temporarily unavailable", ex);
+        }       
     }
 }

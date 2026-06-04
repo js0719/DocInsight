@@ -17,5 +17,6 @@ namespace DocInsight.Core.Models
         public required string Answer { get; init; }
         public required string Question { get; init; }
         public required IReadOnlyList<SearchResult> Sources { get; init; }
+        public IReadOnlyList<string> SuggestedQuestions { get; init; } = Array.Empty<string>();
     }
 }
